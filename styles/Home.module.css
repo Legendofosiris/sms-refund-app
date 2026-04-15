@@ -359,3 +359,69 @@ select.input {
     font-size: 24px;
   }
 }
+
+.topRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.langSwitch {
+  display: flex;
+  gap: 4px;
+  background: #EDECEA;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.langBtn {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-family: 'Sora', sans-serif;
+  font-weight: 500;
+  color: #888;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.langActive {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-family: 'Sora', sans-serif;
+  font-weight: 500;
+  color: #111;
+  background: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 13px;
+  font-size: 14px;
+  font-family: 'Sora', sans-serif;
+  color: #111;
+  background: #F7F6F2;
+  border: 1px solid #E8E6E0;
+  border-radius: 10px;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.15s, background 0.15s;
+  line-height: 1.5;
+}
+
+.textarea:focus {
+  border-color: #0B6EFD;
+  background: #fff;
+}
+
+.textarea::placeholder {
+  color: #BBB;
+}

@@ -5,13 +5,10 @@ const FINANCE_THRESHOLD = 300
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const {
-    requester, manager, clientName, clientEmail,
-    organizationId, credits, currency, amount, sym, date
-  } = req.body
+  const { requester, manager, organizationId, reason, credits, currency, amount, sym, date, needsFinanceApproval } = req.body
 
-  const numericAmount = parseFloat(amount.replace(',', '.'))
-  const needsFinance = numericAmount >= FINANCE_THRESHOLD
+  const numericAmount = parseFloat(String(amount).replace(',', '.'))
+  const needsFinance = needsFinanceApproval || numericAmount >= FINANCE_THRESHOLD
 
   const financeBlock = needsFinance
     ? `\n⚠️ *Validation finance requise* — montant ≥ 300€ · <@${AMAL_SLACK_ID}> merci de valider cette demande.`
@@ -21,8 +18,8 @@ export default async function handler(req, res) {
 
 *Demandeur :* ${requester}
 *Manager :* ${manager}
-*Client :* ${clientName} (${clientEmail})
 *Organization ID :* ${organizationId}
+*Raison :* ${reason}
 *Crédits SMS restants :* ${Number(credits).toLocaleString('fr-FR')}
 *Devise :* ${currency}
 *Montant à rembourser :* ${sym}${amount}
