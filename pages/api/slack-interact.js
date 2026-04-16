@@ -20,14 +20,39 @@ const MODAL = {
   ]
 }
 
-async function openModal(triggerId) {
-  const res = await fetch('https://slack.com/api/views.open', {
+async function appendToSheet(data) {
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
+  const clientEmail = process.env.GOOGLE_CLIENT_EMAIL
+  const sheetId = process.env.GOOGLE_SHEET_ID
+  const jwt = await getJWT(clientEmail, privateKey)
+  const values = [[ data.date, data.requester, data.manager, data.orgId, data.reason, data.credits, data.currency, `${data.sym}${data.amountStr}`, data.needsFinance ? 'Oui' : 'Non' ]]
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A:I:append?valueInputOption=USER_ENTERED`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
-    body: JSON.stringify({ trigger_id: triggerId, view: MODAL })
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+    body: JSON.stringify({ values })
   })
-  const result = await res.json()
-  if (!result.ok) console.error('Slack views.open error:', result.error)
+}
+
+async function getJWT(clientEmail, privateKey) {
+  const header = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
+  const now = Math.floor(Date.now() / 1000)
+  const claim = btoa(JSON.stringify({ iss: clientEmail, scope: 'https://www.googleapis.com/auth/spreadsheets', aud: 'https://oauth2.googleapis.com/token', exp: now + 3600, iat: now }))
+  const signingInput = `${header}.${claim}`
+  const cryptoKey = await crypto.subtle.importKey('pkcs8', pemToArrayBuffer(privateKey), { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign'])
+  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', cryptoKey, new TextEncoder().encode(signingInput))
+  const jwt = `${signingInput}.${btoa(String.fromCharCode(...new Uint8Array(signature)))}`
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}` })
+  const tokenData = await tokenRes.json()
+  return tokenData.access_token
+}
+
+function pemToArrayBuffer(pem) {
+  const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\n/g, '')
+  const binary = atob(b64)
+  const buffer = new ArrayBuffer(binary.length)
+  const view = new Uint8Array(buffer)
+  for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i)
+  return buffer
 }
 
 export default async function handler(req, res) {
@@ -35,13 +60,15 @@ export default async function handler(req, res) {
 
   const payload = JSON.parse(req.body.payload)
 
-  // Shortcut ⚡ ou slash command qui passe par interact
   if (payload.type === 'shortcut' && payload.callback_id === 'sms_refund_shortcut') {
-    await openModal(payload.trigger_id)
+    await fetch('https://slack.com/api/views.open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
+      body: JSON.stringify({ trigger_id: payload.trigger_id, view: MODAL })
+    })
     return res.status(200).end()
   }
 
-  // Soumission du formulaire modal
   if (payload.type === 'view_submission' && payload.view.callback_id === 'sms_refund_modal') {
     const v = payload.view.state.values
     const requester = v.requester.value.value
@@ -57,12 +84,9 @@ export default async function handler(req, res) {
     const amountStr = amount.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const sym = SYMBOLS[currency]
     const needsFinance = amount >= FINANCE_THRESHOLD
-
     const formatDate = (d) => { const [y, m, day] = d.split('-'); return `${day}/${m}/${y}` }
 
-    const financeBlock = needsFinance
-      ? `\n⚠️ *Validation finance requise* — montant ≥ 300€ · <@${AMAL_SLACK_ID}> merci de valider cette demande.`
-      : ''
+    const financeBlock = needsFinance ? `\n⚠️ *Validation finance requise* — montant ≥ 300€ · <@${AMAL_SLACK_ID}> merci de valider cette demande.` : ''
 
     const text = `*Demande de remboursement crédits SMS*${financeBlock}
 
@@ -80,6 +104,8 @@ export default async function handler(req, res) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text })
     })
+
+    await appendToSheet({ date: formatDate(date), requester, manager, orgId, reason, credits, currency, amountStr, sym, needsFinance })
 
     return res.status(200).json({})
   }
