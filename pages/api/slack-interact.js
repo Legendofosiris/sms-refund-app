@@ -1,3 +1,5 @@
+import { JWT } from 'google-auth-library'
+
 const RATES = { USD: 1.09, CAD: 1.37, INR: 82.84, GBP: 0.89, EUR: 1.00 }
 const SYMBOLS = { USD: '$', CAD: 'CA$', INR: '₹', GBP: '£', EUR: '€' }
 const AMAL_SLACK_ID = 'U09BK2SK58A'
@@ -21,38 +23,19 @@ const MODAL = {
 }
 
 async function appendToSheet(data) {
-  const privateKey = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
-  const clientEmail = process.env.GOOGLE_CLIENT_EMAIL
-  const sheetId = process.env.GOOGLE_SHEET_ID
-  const jwt = await getJWT(clientEmail, privateKey)
-  const values = [[ data.date, data.requester, data.manager, data.orgId, data.reason, data.credits, data.currency, `${data.sym}${data.amountStr}`, data.needsFinance ? 'Oui' : 'Non' ]]
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A:I:append?valueInputOption=USER_ENTERED`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-    body: JSON.stringify({ values })
+  const client = new JWT({
+    email: process.env.GOOGLE_CLIENT_EMAIL,
+    key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   })
-}
-
-async function getJWT(clientEmail, privateKey) {
-  const header = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
-  const now = Math.floor(Date.now() / 1000)
-  const claim = btoa(JSON.stringify({ iss: clientEmail, scope: 'https://www.googleapis.com/auth/spreadsheets', aud: 'https://oauth2.googleapis.com/token', exp: now + 3600, iat: now }))
-  const signingInput = `${header}.${claim}`
-  const cryptoKey = await crypto.subtle.importKey('pkcs8', pemToArrayBuffer(privateKey), { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign'])
-  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', cryptoKey, new TextEncoder().encode(signingInput))
-  const jwt = `${signingInput}.${btoa(String.fromCharCode(...new Uint8Array(signature)))}`
-  const tokenRes = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}` })
-  const tokenData = await tokenRes.json()
-  return tokenData.access_token
-}
-
-function pemToArrayBuffer(pem) {
-  const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\n/g, '')
-  const binary = atob(b64)
-  const buffer = new ArrayBuffer(binary.length)
-  const view = new Uint8Array(buffer)
-  for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i)
-  return buffer
+  const token = await client.getAccessToken()
+  const sheetId = process.env.GOOGLE_SHEET_ID
+  const values = [[ data.date, data.requester, data.manager, data.orgId, data.reason, String(data.credits), data.currency, `${data.sym}${data.amountStr}`, data.needsFinance ? 'Oui' : 'Non' ]]
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A:I:append?valueInputOption=USER_ENTERED`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token.token}` }, body: JSON.stringify({ values }) }
+  )
+  if (!res.ok) console.error('Sheets error:', await res.text())
 }
 
 export default async function handler(req, res) {
@@ -85,6 +68,7 @@ export default async function handler(req, res) {
     const sym = SYMBOLS[currency]
     const needsFinance = amount >= FINANCE_THRESHOLD
     const formatDate = (d) => { const [y, m, day] = d.split('-'); return `${day}/${m}/${y}` }
+    const dateFormatted = formatDate(date)
 
     const financeBlock = needsFinance ? `\n⚠️ *Validation finance requise* — montant ≥ 300€ · <@${AMAL_SLACK_ID}> merci de valider cette demande.` : ''
 
@@ -97,7 +81,7 @@ export default async function handler(req, res) {
 *Crédits SMS restants :* ${Number(credits).toLocaleString('fr-FR')}
 *Devise :* ${currency}
 *Montant à rembourser :* ${sym}${amountStr}
-*Date de la demande :* ${formatDate(date)}`
+*Date de la demande :* ${dateFormatted}`
 
     await fetch(process.env.SLACK_WEBHOOK_URL, {
       method: 'POST',
@@ -105,7 +89,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({ text })
     })
 
-    await appendToSheet({ date: formatDate(date), requester, manager, orgId, reason, credits, currency, amountStr, sym, needsFinance })
+    await appendToSheet({ date: dateFormatted, requester, manager, orgId, reason, credits, currency, amountStr, sym, needsFinance })
 
     return res.status(200).json({})
   }

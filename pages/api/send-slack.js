@@ -1,13 +1,17 @@
+import { JWT } from 'google-auth-library'
+
 const AMAL_SLACK_ID = 'U09BK2SK58A'
 const FINANCE_THRESHOLD = 300
 
 async function appendToSheet(data) {
-  const privateKey = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
-  const clientEmail = process.env.GOOGLE_CLIENT_EMAIL
-  const sheetId = process.env.GOOGLE_SHEET_ID
+  const client = new JWT({
+    email: process.env.GOOGLE_CLIENT_EMAIL,
+    key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  })
 
-  const now = new Date()
-  const jwt = await getJWT(clientEmail, privateKey)
+  const token = await client.getAccessToken()
+  const sheetId = process.env.GOOGLE_SHEET_ID
 
   const values = [[
     data.date,
@@ -15,57 +19,25 @@ async function appendToSheet(data) {
     data.manager,
     data.organizationId,
     data.reason,
-    data.credits,
+    String(data.credits),
     data.currency,
     `${data.sym}${data.amount}`,
     data.needsFinanceApproval ? 'Oui' : 'Non'
   ]]
 
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A:I:append?valueInputOption=USER_ENTERED`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
-    body: JSON.stringify({ values })
-  })
-}
-
-async function getJWT(clientEmail, privateKey) {
-  const header = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
-  const now = Math.floor(Date.now() / 1000)
-  const claim = btoa(JSON.stringify({
-    iss: clientEmail,
-    scope: 'https://www.googleapis.com/auth/spreadsheets',
-    aud: 'https://oauth2.googleapis.com/token',
-    exp: now + 3600,
-    iat: now
-  }))
-
-  const signingInput = `${header}.${claim}`
-  const cryptoKey = await crypto.subtle.importKey(
-    'pkcs8',
-    pemToArrayBuffer(privateKey),
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign']
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A:I:append?valueInputOption=USER_ENTERED`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token.token}` },
+      body: JSON.stringify({ values })
+    }
   )
-  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', cryptoKey, new TextEncoder().encode(signingInput))
-  const jwt = `${signingInput}.${btoa(String.fromCharCode(...new Uint8Array(signature)))}`
 
-  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
-  })
-  const tokenData = await tokenRes.json()
-  return tokenData.access_token
-}
-
-function pemToArrayBuffer(pem) {
-  const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\n/g, '')
-  const binary = atob(b64)
-  const buffer = new ArrayBuffer(binary.length)
-  const view = new Uint8Array(buffer)
-  for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i)
-  return buffer
+  if (!res.ok) {
+    const err = await res.text()
+    console.error('Sheets error:', err)
+  }
 }
 
 export default async function handler(req, res) {
