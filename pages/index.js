@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import Head from 'next/head'
 import styles from '../styles/Home.module.css'
 
-const RATES = { USD: 1.09, CAD: 1.37, INR: 82.84, GBP: 0.89, EUR: 1.00 }
+const RATES = { USD: 1.152455, CAD: 1.605658, INR: 109.908292, GBP: 0.863715, EUR: 1.00 }
 const SYMBOLS = { USD: '$', CAD: 'CA$', INR: '₹', GBP: '£', EUR: '€' }
 const CURRENCY_LABELS = {
   USD: 'Dollar américain / US Dollar',
